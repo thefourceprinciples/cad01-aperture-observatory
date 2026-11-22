@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CAD-01 Interactive 3D Aperture & Origami Studio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+    body { background: #0d1117; color: #e6edf3; display: flex; height: 100vh; overflow: hidden; }
+    #sidebar {
+      width: 330px; background: #161b22; border-right: 1px solid #30363d;
+      padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow-y: auto;
+    }
+    h1 { font-size: 1.15rem; color: #58a6ff; letter-spacing: 0.4px; }
+    p.sub { font-size: 0.8rem; color: #8b949e; line-height: 1.4; }
+    .control-group { display: flex; flex-direction: column; gap: 6px; background: #0d1117; padding: 12px; border-radius: 8px; border: 1px solid #30363d; }
+    label { font-size: 0.82rem; display: flex; justify-content: space-between; color: #c9d1d9; }
+    span.val { color: #58a6ff; font-weight: 600; font-family: monospace; }
+    input[type="range"] { width: 100%; accent-color: #58a6ff; cursor: pointer; }
+    select, button {
+      width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #30363d;
+      background: #21262d; color: #e6edf3; font-size: 0.88rem; cursor: pointer;
+    }
+    button.primary { background: #238636; border-color: #2ea043; font-weight: 600; }
+    button.primary:hover { background: #2ea043; }
+    .metrics { font-size: 0.8rem; font-family: monospace; color: #7ee787; line-height: 1.6; }
+    #viewport { flex: 1; position: relative; }
+    #hud {
+      position: absolute; bottom: 14px; left: 16px; font-size: 0.78rem;
+      color: #8b949e; background: rgba(13,17,23,0.75); padding: 6px 10px; border-radius: 6px;
+    }
+  </style>
+  <!-- Load Three.js + OrbitControls + STLExporter from CDN -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com",
+        "three/addons/": "https://unpkg.com"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="sidebar">
+    <div>
+      <h1>CAD-01 3D Studio</h1>
+      <p class="sub">Interactive Spirograph-to-Kagome &amp; Kresling Origami Generator (<code>C = O × E × H × X</code>)</p>
+    </div>
+
+    <div class="control-group">
+      <label>Active 3D Model</label>
+      <select id="modelSelect">
+        <option value="assembly">Full Gate Assembly (O + E + H)</option>
+        <option value="kagome">Kagome Aperture Gate (O)</option>
+        <option value="phase">Rotating Spirograph Mask (E)</option>
+        <option value="kresling">2-Story Kresling Collar (H)</option>
+      </select>
+    </div>
+
+    <div class="control-group">
+      <label>Spirograph Lobes (R/r) <span class="val" id="lobesVal">6</span></label>
+      <input type="range" id="lobesSlider" min="3" max="12" step="1" value="6" />
+
+      <label>Strut / Rib Width (mm) <span class="val" id="strutVal">2.0</span></label>
+      <input type="range" id="strutSlider" min="1.0" max="4.0" step="0.2" value="2.0" />
+
+      <label>Phase Mask Rotation (E°) <span class="val" id="rotVal">0°</span></label>
+      <input type="range" id="rotSlider" min="0" max="360" step="1" value="0" />
+
+      <label>Origami Compression (H) <span class="val" id="compVal">0%</span></label>
+      <input type="range" id="compSlider" min="0" max="100" step="1" value="0" />
+    </div>
+
+    <div class="control-group metrics" id="metricsBox">
+      Tube ID: 75.0 mm | Halo OD: 88.0 mm<br/>
+      Coupled Twist Δφ: 0.0°<br/>
+      Gate State: READY
+    </div>
+
+    <button class="primary" id="exportBtn">Download Active .STL File</button>
+  </div>
+
+  <div id="viewport">
+    <div id="hud">Left-Drag: Rotate | Right-Drag: Pan | Scroll: Zoom</div>
+  </div>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { STLExporter } from 'three/addons/exporters/STLExporter.js';
+
+    // --- Scene Setup ---
+    const viewport = document.getElementById('viewport');
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x0d1117);
+
+    const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.1, 1000);
+    camera.position.set(0, -115, 95);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+    viewport.appendChild(renderer.domElement);
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+
+    // Lighting & Reference Grid
+    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    dirLight.position.set(60, -80, 120);
+    scene.add(dirLight);
+
+    const grid = new THREE.GridHelper(160, 16, 0x30363d, 0x21262d);
+    grid.rotation.x = Math.PI / 2;
+    scene.add(grid);
+
+    let activeGroup = new THREE.Group();
+    scene.add(activeGroup);
+
+    // Helper: Build extruded 3D bar between (x1,y1) and (x2,y2)
+    function createStrutMesh(x1, y1, x2, y2, width, height, material) {
+      const dx = x2 - x1, dy = y2 - y1;
+      const len = Math.hypot(dx, dy);
+      if (len < 0.05) return null;
+      const geom = new THREE.BoxGeometry(len, width, height);
+      const mesh = new THREE.Mesh(geom, material);
+      mesh.position.set((x1 + x2) / 2, (y1 + y2) / 2, height / 2);
+      mesh.rotation.z = Math.atan2(dy, dx);
+      return mesh;
+    }
+
+    // Helper: Build Halo ring
+    function createRingMesh(rIn, rOut, height, material) {
+      const shape = new THREE.Shape();
+      shape.absarc(0, 0, rOut, 0, Math.PI * 2, false);
+      const hole = new THREE.Path();
+      hole.absarc(0, 0, rIn, 0, Math.PI * 2, true);
+      shape.holes.push(hole);
+      const geom = new THREE.ExtrudeGeometry(shape, { depth: height, bevelEnabled: false, curveSegments: 72 });
+      return new THREE.Mesh(geom, material);
+    }
+
+    // 1. Build Kagome Aperture Gate (O)
+    function buildKagomeGroup(lobes, strutWidth) {
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0x58a6ff, metalness: 0.25, roughness: 0.4 });
+      const tubeR = 37.5, flangeR = 44.0, thick = 3.0;
+
+      group.add(createRingMesh(tubeR - 1.5, flangeR, thick, mat));
+
+      // Generate concentric kagome-style triangulated rings
+      const rings = 3;
+      const nodes = [];
+      for (let rIdx = 1; rIdx <= rings; rIdx++) {
+        const r = (tubeR * 0.88 * rIdx) / rings;
+        const count = lobes * rIdx;
+        for (let k = 0; k < count; k++) {
+          const ang = (2 * Math.PI * k) / count + (rIdx % 2 === 0 ? Math.PI / count : 0);
+          nodes.push([r * Math.cos(ang), r * Math.sin(ang)]);
+        }
+      }
+      // Connect nearest neighbors into kagome struts
+      const maxEdge = (tubeR / rings) * 1.45;
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const d = Math.hypot(nodes[i][0] - nodes[j][0], nodes[i][1] - nodes[j][1]);
+          if (d <= maxEdge) {
+            const strut = createStrutMesh(nodes[i][0], nodes[i][1], nodes[j][0], nodes[j][1], strutWidth, thick, mat);
+            if (strut) group.add(strut);
+          }
+        }
+        // Anchor outer ring nodes to Halo rim
+        const rNode = Math.hypot(nodes[i][0], nodes[i][1]);
+        if (rNode > tubeR * 0.72) {
+          const ang = Math.atan2(nodes[i][1], nodes[i][0]);
+          const rimStrut = createStrutMesh(nodes[i][0], nodes[i][1], (tubeR - 1) * Math.cos(ang), (tubeR - 1) * Math.sin(ang), strutWidth, thick, mat);
+          if (rimStrut) group.add(rimStrut);
+        }
+      }
+      return group;
+    }
+
+    // 2. Build Rotating Spirograph Phase Mask (E)
+    function buildPhaseMaskGroup(lobes, strutWidth) {
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({ color: 0xf0883e, metalness: 0.3, roughness: 0.35 });
+      const tubeR = 37.5, diskR = 42.0, thick = 2.4;
+
+      group.add(createRingMesh(tubeR - 1.0, diskR, thick, mat));
+      group.add(createRingMesh(2.55, 9.5, thick, mat)); // 5mm shaft hub
+
+      const segs = 48;
+      for (let k = 0; k < lobes; k++) {
+        const baseAng = (2 * Math.PI * k) / lobes;
+        let prev = null;
+        for (let s = 0; s <= segs; s++) {
+          const u = s / segs;
+          const r = 9.0 + u * (tubeR - 9.5);
+          const theta = baseAng + 0.85 * Math.sin(u * Math.PI);
+          const pt = [r * Math.cos(theta), r * Math.sin(theta)];
+          if (prev) {
+            const rib = createStrutMesh(prev[0], prev[1], pt[0], pt[1], strutWidth * 1.2, thick, mat);
+            if (rib) group.add(rib);
+          }
+          prev = pt;
+        }
+      }
+      return group;
+    }
+
+    // 3. Build 2-Story Kresling Origami Bellows (H)
+    function buildKreslingGroup(compressionFrac) {
+      const group = new THREE.Group();
+      const mat = new THREE.MeshStandardMaterial({
+        color: 0x3fb950, transparent: true, opacity: 0.82, side: THREE.DoubleSide, roughness: 0.5
+      });
+      const N = 6, R = 35.0;
+      const hStory = 30.3 * (1 - 0.62 * compressionFrac);
+      const twist = THREE.MathUtils.degToRad(38.2 * compressionFrac);
+
+      const vertices = [];
+      const addTri = (a, b, c) => { vertices.push(...a, ...b, ...c); };
+
+      // Story 1 (z = 0 -> hStory) & Story 2 (z = hStory -> 2*hStory)
+      for (let story = 0; story < 2; story++) {
+        const z0 = story * hStory;
+        const z1 = (story + 1) * hStory;
+        const a0 = story === 0 ? 0 : twist;
+        const a1 = story === 0 ? twist : 0;
+
+        for (let i = 0; i < N; i++) {
+          const t0 = (2 * Math.PI * i) / N + a0;
+          const t1 = (2 * Math.PI * (i + 1)) / N + a0;
+          const u0 = (2 * Math.PI * i) / N + a1;
+const u1 = (2 * Math.PI * (i + 1)) / N + a1;
+const B0 = [R * Math.cos(t0), R * Math.sin(t0), z0];
+const B1 = [R * Math.cos(t1), R * Math.sin(t1), z0];
+const T0 = [R * Math.cos(u0), R * Math.sin(u0), z1];
+const T1 = [R * Math.cos(u1), R * Math.sin(u1), z1];
+// Diagonal valley fold triangulation
+addTri(B0, B1, T1);
+addTri(B0, T1, T0);
+}
+}
+const geom = new THREE.BufferGeometry();
+geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+geom.computeVertexNormals();
+group.add(new THREE.Mesh(geom, mat));
+return group;
+}
+// Rebuild Scene on UI Change
+function rebuildModel() {
+scene.remove(activeGroup);
+activeGroup = new THREE.Group();
+const mode = document.getElementById('modelSelect').value;
+const lobes = parseInt(document.getElementById('lobesSlider').value);
+const strut = parseFloat(document.getElementById('strutSlider').value);
+const rotDeg = parseInt(document.getElementById('rotSlider').value);
+const compPct = parseInt(document.getElementById('compSlider').value);
+const compFrac = compPct / 100.0;
+document.getElementById('lobesVal').textContent = lobes;
+document.getElementById('strutVal').textContent = strut.toFixed(1);
+document.getElementById('rotVal').textContent = ${rotDeg}°;
+document.getElementById('compVal').textContent = ${compPct}%;
+const twistDeg = (38.2 * compFrac).toFixed(1);
+document.getElementById('metricsBox').innerHTML =
+Tube ID: 75.0 mm | Halo OD: 88.0 mm<br/>Coupled Twist Δφ: ${twistDeg}°<br/>Total Stroke: ${(37.6 * compFrac).toFixed(1)} mm;
+if (mode === 'kagome') {
+activeGroup.add(buildKagomeGroup(lobes, strut));
+} else if (mode === 'phase') {
+const pm = buildPhaseMaskGroup(lobes, strut);
+pm.rotation.z = THREE.MathUtils.degToRad(rotDeg);
+activeGroup.add(pm);
+} else if (mode === 'kresling') {
+activeGroup.add(buildKreslingGroup(compFrac));
+} else {
+// Full stacked assembly (H bellows + O kagome + E rotating phase mask)
+const kres = buildKreslingGroup(compFrac);
+const hTop = 2 * 30.3 * (1 - 0.62 * compFrac);
+const kag = buildKagomeGroup(lobes, strut);
+kag.position.z = hTop + 1.0;
+const pm = buildPhaseMaskGroup(lobes, strut);
+pm.position.z = hTop + 5.5;
+pm.rotation.z = THREE.MathUtils.degToRad(rotDeg + parseFloat(twistDeg));
+activeGroup.add(kres, kag, pm);
+}
+scene.add(activeGroup);
+}
+// Bind UI Controls
+['modelSelect', 'lobesSlider', 'strutSlider', 'rotSlider', 'compSlider'].forEach(id => {
+document.getElementById(id).addEventListener('input', rebuildModel);
+});
+// Export Binary STL directly from Browser
+document.getElementById('exportBtn').addEventListener('click', () => {
+const exporter = new STLExporter();
+const stlData = exporter.parse(activeGroup, { binary: true });
+const blob = new Blob([stlData], { type: 'application/octet-stream' });
+const link = document.createElement('a');
+link.href = URL.createObjectURL(blob);
+link.download = cad01_${document.getElementById('modelSelect').value}.stl;
+link.click();
+});
+window.addEventListener('resize', () => {
+camera.aspect = viewport.clientWidth / viewport.clientHeight;
+camera.updateProjectionMatrix();
+renderer.setSize(viewport.clientWidth, viewport.clientHeight);
+});
+rebuildModel();
+function animate() {
+requestAnimationFrame(animate);
+controls.update();
+renderer.render(scene, camera);
+}
+animate();
