@@ -29,7 +29,8 @@ window.CAD01_Mesh = (function () {
     function pushQuad(p0, p1, p2, p3, rgb, alpha, addStl) {
       faces.push({ pts: [p0, p1, p2, p3], rgb: rgb, alpha: alpha });
       if (addStl) {
-        stlTris.push([p0, p1, p2], [p0, p2, p3]);
+        stlTris.push({ a: p0, b: p1, c: p2 });
+        stlTris.push({ a: p0, b: p2, c: p3 });
       }
     }
 
@@ -42,12 +43,12 @@ window.CAD01_Mesh = (function () {
       const t0 = { x: x1 + nx, y: y1 + ny, z: z1 }, t1 = { x: x1 - nx, y: y1 - ny, z: z1 };
       const t2 = { x: x2 - nx, y: y2 - ny, z: z1 }, t3 = { x: x2 + nx, y: y2 + ny, z: z1 };
 
-      pushQuad(t0, t1, t2, t3, rgb, 1.0, true);  // Top
-      pushQuad(b0, b3, b2, b1, rgb, 1.0, true);  // Bottom
-      pushQuad(b0, b1, t1, t0, rgb, 1.0, true);  // End 1
-      pushQuad(b2, b3, t3, t2, rgb, 1.0, true);  // End 2
-      pushQuad(b1, b2, t2, t1, rgb, 1.0, true);  // Side A
-      pushQuad(b3, b0, t0, t3, rgb, 1.0, true);  // Side B
+      pushQuad(t0, t1, t2, t3, rgb, 1.0, true);
+      pushQuad(b0, b3, b2, b1, rgb, 1.0, true);
+      pushQuad(b0, b1, t1, t0, rgb, 1.0, true);
+      pushQuad(b2, b3, t3, t2, rgb, 1.0, true);
+      pushQuad(b1, b2, t2, t1, rgb, 1.0, true);
+      pushQuad(b3, b0, t0, t3, rgb, 1.0, true);
     }
 
     function addRing(rIn, rOut, z0, z1, rgb, segs) {
@@ -70,7 +71,7 @@ window.CAD01_Mesh = (function () {
     }
 
     function addKagome(zBase) {
-      const rgb =;
+      const rgb = { r: 88, g: 166, b: 255 };
       const tubeR = 37.5, flangeR = 44.0, thick = 3.0;
       addRing(tubeR - 1.5, flangeR, zBase, zBase + thick, rgb, 64);
 
@@ -84,20 +85,22 @@ window.CAD01_Mesh = (function () {
       }
       const maxEdge = (tubeR / rings) * 1.45;
       for (let i = 0; i < nodes.length; i++) {
+        const nA = nodes.at(i);
         for (let j = i + 1; j < nodes.length; j++) {
-          if (Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y) <= maxEdge) {
-            addBeam(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y, zBase, zBase + thick, strut, rgb);
+          const nB = nodes.at(j);
+          if (Math.hypot(nA.x - nB.x, nA.y - nB.y) <= maxEdge) {
+            addBeam(nA.x, nA.y, nB.x, nB.y, zBase, zBase + thick, strut, rgb);
           }
         }
-        if (Math.hypot(nodes[i].x, nodes[i].y) > tubeR * 0.72) {
-          const ang = Math.atan2(nodes[i].y, nodes[i].x);
-          addBeam(nodes[i].x, nodes[i].y, (tubeR - 1) * Math.cos(ang), (tubeR - 1) * Math.sin(ang), zBase, zBase + thick, strut, rgb);
+        if (Math.hypot(nA.x, nA.y) > tubeR * 0.72) {
+          const ang = Math.atan2(nA.y, nA.x);
+          addBeam(nA.x, nA.y, (tubeR - 1) * Math.cos(ang), (tubeR - 1) * Math.sin(ang), zBase, zBase + thick, strut, rgb);
         }
       }
     }
 
     function addPhaseMask(zBase, angleDeg) {
-      const rgb =;
+      const rgb = { r: 240, g: 136, b: 62 };
       const tubeR = 37.5, diskR = 42.0, thick = 2.4, rot = (angleDeg * Math.PI) / 180;
       addRing(tubeR - 1.0, diskR, zBase, zBase + thick, rgb, 64);
       addRing(2.55, 9.5, zBase, zBase + thick, rgb, 32);
@@ -116,8 +119,8 @@ window.CAD01_Mesh = (function () {
     }
 
     function addKresling() {
-      const rgbPanelA =;
-      const rgbPanelB =;
+      const rgbPanelA = { r: 63, g: 185, b: 80 };
+      const rgbPanelB = { r: 46, g: 160, b: 67 };
       const N = 6, R = 35.0, hStory = 30.3 * (1 - 0.62 * compFrac), twist = (38.2 * compFrac * Math.PI) / 180;
 
       for (let story = 0; story < 2; story++) {
@@ -131,10 +134,10 @@ window.CAD01_Mesh = (function () {
           const T0 = { x: R * Math.cos(u0), y: R * Math.sin(u0), z: z1 };
           const T1 = { x: R * Math.cos(u1), y: R * Math.sin(u1), z: z1 };
 
-          // Two triangular origami facets per side panel
           faces.push({ pts: [B0, B1, T1], rgb: rgbPanelA, alpha: 0.78 });
           faces.push({ pts: [B0, T1, T0], rgb: rgbPanelB, alpha: 0.78 });
-          stlTris.push([B0, B1, T1], [B0, T1, T0]);
+          stlTris.push({ a: B0, b: B1, c: T1 });
+          stlTris.push({ a: B0, b: T1, c: T0 });
         }
       }
       return 2 * hStory;
