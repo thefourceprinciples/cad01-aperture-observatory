@@ -6,14 +6,6 @@
   <title>CAD-01 Interactive 3D Aperture & Origami Studio</title>
   <link rel="icon" href="data:," />
   <link rel="stylesheet" href="studio/style.css" />
-  <script type="importmap">
-    {
-      "imports": {
-        "three": "https://jsdelivr.net",
-        "three/addons/": "https://jsdelivr.net"
-      }
-    }
-  </script>
 </head>
 <body>
   <div id="sidebar">
@@ -60,9 +52,10 @@
   </div>
 
   <div id="viewport">
-    <div id="hud">Left-Drag: Rotate | Right-Drag: Pan | Scroll: Zoom</div>
+    <canvas id="canvas3d" style="width:100%; height:100%; display:block;"></canvas>
+    <div id="hud">Left-Drag: Orbit 3D | Scroll: Zoom | Zero-CDN Engine</div>
   </div>
 
-  <script type="module" src="studio/app.js"></script>
+  <script src="studio/app.js"></script>
 </body>
 </html>
