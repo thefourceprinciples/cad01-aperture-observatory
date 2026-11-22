@@ -1,160 +1,123 @@
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { STLExporter } from 'three/addons/exporters/STLExporter.js';
-import { buildKagomeGroup, buildPhaseMaskGroup, buildKreslingGroup } from './geometry.js';
+(function () {
+  const canvas = document.getElementById('canvas3d');
+  const ctx = canvas.getContext('2d');
 
-const viewport = document.getElementById('viewport');
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0d1117);
+  let rotZ = 0.55;
+  let rotX = 1.05;
+  let zoom = 4.2;
+  let dragging = false;
+  let lastMouse = { x: 0, y: 0 };
 
-const camera = new THREE.PerspectiveCamera(45, viewport.clientWidth / viewport.clientHeight, 0.1, 1000);
-camera.position.set(0, -135, 95);
-
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-viewport.appendChild(renderer.domElement);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.target.set(0, 0, 28);
-
-scene.add(new THREE.AmbientLight(0xffffff, 0.65));
-const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
-dirLight.position.set(60, -80, 120);
-scene.add(dirLight);
-
-const grid = new THREE.GridHelper(160, 16, 0x30363d, 0x21262d);
-grid.rotation.x = Math.PI / 2;
-scene.add(grid);
-
-let activeGroup = new THREE.Group();
-scene.add(activeGroup);
-
-const waveGroup = new THREE.Group();
-scene.add(waveGroup);
-const waveRings = [];
-for (let i = 0; i < 8; i++) {
-  const ringGeom = new THREE.RingGeometry(8, 34, 48);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0x58a6ff, side: THREE.DoubleSide, transparent: true, opacity: 0.35
+  canvas.addEventListener('mousedown', function (e) {
+    dragging = true;
+    lastMouse = { x: e.clientX, y: e.clientY };
   });
-  const mesh = new THREE.Mesh(ringGeom, ringMat);
-  waveGroup.add(mesh);
-  waveRings.push({ mesh, phase: i / 8 });
-}
+  window.addEventListener('mouseup', function () { dragging = false; });
+  window.addEventListener('mousemove', function (e) {
+    if (!dragging) return;
+    rotZ += (e.clientX - lastMouse.x) * 0.008;
+    rotX = Math.max(0.15, Math.min(Math.PI - 0.15, rotX + (e.clientY - lastMouse.y) * 0.008));
+    lastMouse = { x: e.clientX, y: e.clientY };
+  });
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    zoom = Math.max(1.5, Math.min(12.0, zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
+  }, { passive: false });
 
-let currentCoherence = 0.0;
-let gateTopZ = 65.0;
-
-function rebuildModel() {
-  scene.remove(activeGroup);
-  activeGroup = new THREE.Group();
-
-  const mode = document.getElementById('modelSelect').value;
-  const lobes = parseInt(document.getElementById('lobesSlider').value);
-  const strut = parseFloat(document.getElementById('strutSlider').value);
-  const rotDeg = parseInt(document.getElementById('rotSlider').value);
-  const compPct = parseInt(document.getElementById('compSlider').value);
-  const compFrac = compPct / 100.0;
-
-  document.getElementById('lobesVal').textContent = lobes;
-  document.getElementById('strutVal').textContent = strut.toFixed(1);
-  document.getElementById('rotVal').textContent = `${rotDeg}°`;
-  document.getElementById('compVal').textContent = `${compPct}%`;
-
-  const twistDeg = 38.2 * compFrac;
-  const totalAngle = (rotDeg + twistDeg) % (360 / lobes);
-  const phaseAlign = Math.cos((totalAngle / (360 / lobes)) * 2 * Math.PI) * 0.5 + 0.5;
-  const hAlign = Math.exp(-Math.pow((compFrac - 0.65) / 0.28, 2));
-  currentCoherence = Number((0.95 * phaseAlign * hAlign).toFixed(3));
-  const status = currentCoherence >= 0.80 ? 'OPEN (LOCKED)' : (currentCoherence >= 0.55 ? 'HOLD / FILTERED' : 'CLOSED');
-
-  document.getElementById('metricsBox').innerHTML =
-    `Tube ID: 75.0 mm | Halo OD: 88.0 mm<br/>Coupled Twist Δφ: ${twistDeg.toFixed(1)}°<br/>Coherence C: ${currentCoherence.toFixed(2)} | ${status}`;
-
-  if (mode === 'kagome') {
-    activeGroup.add(buildKagomeGroup(lobes, strut));
-    gateTopZ = 3.0;
-    controls.target.set(0, 0, 2);
-  } else if (mode === 'phase') {
-    const pm = buildPhaseMaskGroup(lobes, strut);
-    pm.rotation.z = THREE.MathUtils.degToRad(rotDeg);
-    activeGroup.add(pm);
-    gateTopZ = 2.4;
-    controls.target.set(0, 0, 2);
-  } else if (mode === 'kresling') {
-    activeGroup.add(buildKreslingGroup(compFrac));
-    gateTopZ = 2 * 30.3 * (1 - 0.62 * compFrac);
-    controls.target.set(0, 0, gateTopZ / 2);
-  } else {
-    const kres = buildKreslingGroup(compFrac);
-    const hTop = 2 * 30.3 * (1 - 0.62 * compFrac);
-    gateTopZ = hTop + 8.0;
-    controls.target.set(0, 0, gateTopZ / 2);
-
-    const kag = buildKagomeGroup(lobes, strut);
-    kag.position.z = hTop + 1.0;
-
-    const pm = buildPhaseMaskGroup(lobes, strut);
-    pm.position.z = hTop + 5.5;
-    pm.rotation.z = THREE.MathUtils.degToRad(rotDeg + twistDeg);
-
-    activeGroup.add(kres, kag, pm);
+  function project3D(x, y, z, cx, cy) {
+    const cz = Math.cos(rotZ), sz = Math.sin(rotZ);
+    const cxr = Math.cos(rotX), sxr = Math.sin(rotX);
+    const x1 = x * cz - y * sz;
+    const y1 = x * sz + y * cz;
+    const y2 = y1 * cxr - z * sxr;
+    const z2 = y1 * sxr + z * cxr;
+    const perspective = 450 / (450 + z2);
+    return { x: cx + x1 * zoom * perspective, y: cy - y2 * zoom * perspective };
   }
 
-  scene.add(activeGroup);
-}
-
-['modelSelect', 'lobesSlider', 'strutSlider', 'rotSlider', 'compSlider'].forEach((id) => {
-  document.getElementById(id).addEventListener('input', rebuildModel);
-});
-
-document.getElementById('exportBtn').addEventListener('click', () => {
-  const exporter = new STLExporter();
-  const stlData = exporter.parse(activeGroup, { binary: true });
-  const blob = new Blob([stlData], { type: 'application/octet-stream' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `cad01_${document.getElementById('modelSelect').value}.stl`;
-  link.click();
-});
-
-window.addEventListener('resize', () => {
-  camera.aspect = viewport.clientWidth / viewport.clientHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(viewport.clientWidth, viewport.clientHeight);
-});
-
-rebuildModel();
-const clock = new THREE.Clock();
-
-function animate() {
-  requestAnimationFrame(animate);
-  const dt = clock.getDelta();
-  const showWaves = document.getElementById('waveToggle').checked;
-  waveGroup.visible = showWaves;
-
-  if (showWaves) {
-    waveRings.forEach((w) => {
-      w.phase = (w.phase + dt * 0.65) % 1.0;
-      const z = -45 + w.phase * 135;
-      const pastGate = z > gateTopZ;
-      w.mesh.position.z = z;
-
-      if (pastGate) {
-        w.mesh.material.color.setHex(0x3fb950);
-        w.mesh.material.opacity = currentCoherence * (1.0 - (z - gateTopZ) / 60.0) * 0.65;
-        const s = 0.6 + 0.4 * currentCoherence;
-        w.mesh.scale.set(s, s, 1);
-      } else {
-        w.mesh.material.color.setHex(0x58a6ff);
-        w.mesh.material.opacity = 0.25 * (1.0 - Math.abs(z + 20) / 40.0);
-        w.mesh.scale.set(1, 1, 1);
+  document.getElementById('exportBtn').addEventListener('click', function () {
+    const data = window.CAD01_Mesh.buildSceneData();
+    const stlTris = data.stlTris;
+    const buf = new ArrayBuffer(84 + stlTris.length * 50);
+    const view = new DataView(buf);
+    view.setUint32(80, stlTris.length, true);
+    let offset = 84;
+    for (let i = 0; i < stlTris.length; i++) {
+      view.setFloat32(offset + 8, 1.0, true);
+      offset += 12;
+      for (let j = 0; j < 3; j++) {
+        const v = stlTris[i][j];
+        view.setFloat32(offset, v.x, true);
+        view.setFloat32(offset + 4, v.y, true);
+        view.setFloat32(offset + 8, v.z, true);
+        offset += 12;
       }
-    });
-  }
+      view.setUint16(offset, 0, true);
+      offset += 2;
+    }
+    const blob = new Blob([buf], { type: 'application/octet-stream' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'cad01_' + document.getElementById('modelSelect').value + '.stl';
+    link.click();
+  });
 
-  controls.update();
-  renderer.render(scene, camera);
-}
-animate();
+  function render(now) {
+    const waveTime = now * 0.001;
+    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+      canvas.width = canvas.clientWidth;
+      canvas.height = canvas.clientHeight;
+    }
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    const cx = canvas.width / 2;
+    const cy = canvas.height * 0.58;
+    const data = window.CAD01_Mesh.buildSceneData();
+
+    ctx.strokeStyle = '#21262d';
+    ctx.lineWidth = 1;
+    for (let g = -60; g <= 60; g += 20) {
+      const p1 = project3D(g, -60, 0, cx, cy), p2 = project3D(g, 60, 0, cx, cy);
+      const p3 = project3D(-60, g, 0, cx, cy), p4 = project3D(60, g, 0, cx, cy);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke();
+    }
+
+    for (let i = 0; i < data.lines.length; i++) {
+      const seg = data.lines[i];
+      const p1 = project3D(seg.x1, seg.y1, seg.z1, cx, cy);
+      const p2 = project3D(seg.x2, seg.y2, seg.z2, cx, cy);
+      ctx.strokeStyle = seg.color;
+      ctx.lineWidth = seg.w;
+      ctx.beginPath();
+      ctx.moveTo(p1.x, p1.y);
+      ctx.lineTo(p2.x, p2.y);
+      ctx.stroke();
+    }
+
+    if (document.getElementById('waveToggle').checked) {
+      for (let i = 0; i < 6; i++) {
+        const phase = (waveTime * 0.5 + i / 6) % 1.0;
+        const z = -35 + phase * 115;
+        const past = z > data.gateTopZ;
+        const alpha = past ? data.coherence * (1 - (z - data.gateTopZ) / 55) * 0.85 : 0.35;
+        if (alpha <= 0.02) continue;
+
+        ctx.strokeStyle = past ? 'rgba(63, 185, 80, ' + alpha + ')' : 'rgba(88, 166, 255, ' + alpha + ')';
+        ctx.lineWidth = past ? 2.2 : 1.4;
+        ctx.beginPath();
+        const rWave = past ? 22 + 12 * data.coherence : 34;
+        for (let s = 0; s <= 48; s++) {
+          const a = (2 * Math.PI * s) / 48;
+          const pt = project3D(rWave * Math.cos(a), rWave * Math.sin(a), z, cx, cy);
+          if (s === 0) ctx.moveTo(pt.x, pt.y);
+          else ctx.lineTo(pt.x, pt.y);
+        }
+        ctx.stroke();
+      }
+    }
+    requestAnimationFrame(render);
+  }
+  requestAnimationFrame(render);
+})();
