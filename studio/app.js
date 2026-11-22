@@ -24,15 +24,19 @@
     zoom = Math.max(1.5, Math.min(12.0, zoom * (e.deltaY > 0 ? 0.92 : 1.08)));
   }, { passive: false });
 
-  function project3D(x, y, z, cx, cy) {
+  function transformPoint(p) {
     const cz = Math.cos(rotZ), sz = Math.sin(rotZ);
     const cxr = Math.cos(rotX), sxr = Math.sin(rotX);
-    const x1 = x * cz - y * sz;
-    const y1 = x * sz + y * cz;
-    const y2 = y1 * cxr - z * sxr;
-    const z2 = y1 * sxr + z * cxr;
-    const perspective = 450 / (450 + z2);
-    return { x: cx + x1 * zoom * perspective, y: cy - y2 * zoom * perspective };
+    const x1 = p.x * cz - p.y * sz;
+    const y1 = p.x * sz + p.y * cz;
+    const y2 = y1 * cxr - p.z * sxr;
+    const z2 = y1 * sxr + p.z * cxr;
+    return { x: x1, y: y2, z: z2 };
+  }
+
+  function projectCam(camPt, cx, cy) {
+    const perspective = 480 / (480 + camPt.z);
+    return { x: cx + camPt.x * zoom * perspective, y: cy - camPt.y * zoom * perspective };
   }
 
   document.getElementById('exportBtn').addEventListener('click', function () {
@@ -62,61 +66,132 @@
     link.click();
   });
 
+  // Directional key light vector in camera space
+  const lightDir = { x: 0.45, y: 0.65, z: -0.61 };
+
   function render(now) {
     const waveTime = now * 0.001;
-    if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-      canvas.width = canvas.clientWidth;
-      canvas.height = canvas.clientHeight;
-    }
-    ctx.fillStyle = '#0d1117';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    const dpr = window.devicePixelRatio || 1;
+    const rectW = canvas.clientWidth;
+    const rectH = canvas.clientHeight;
 
-    const cx = canvas.width / 2;
-    const cy = canvas.height * 0.58;
+    if (canvas.width !== Math.floor(rectW * dpr) || canvas.height !== Math.floor(rectH * dpr)) {
+      canvas.width = Math.floor(rectW * dpr);
+      canvas.height = Math.floor(rectH * dpr);
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+
+    // Subtle radial studio backdrop gradient
+    const bgGrad = ctx.createRadialGradient(rectW * 0.5, rectH * 0.5, 20, rectW * 0.5, rectH * 0.5, rectW * 0.65);
+    bgGrad.addColorStop(0, '#161b22');
+    bgGrad.addColorStop(1, '#090c10');
+    ctx.fillStyle = bgGrad;
+    ctx.fillRect(0, 0, rectW, rectH);
+
+    const cx = rectW / 2;
+    const cy = rectH * 0.58;
     const data = window.CAD01_Mesh.buildSceneData();
 
-    ctx.strokeStyle = '#21262d';
+    // Base reference grid
+    ctx.strokeStyle = 'rgba(48, 54, 61, 0.55)';
     ctx.lineWidth = 1;
     for (let g = -60; g <= 60; g += 20) {
-      const p1 = project3D(g, -60, 0, cx, cy), p2 = project3D(g, 60, 0, cx, cy);
-      const p3 = project3D(-60, g, 0, cx, cy), p4 = project3D(60, g, 0, cx, cy);
+      const p1 = projectCam(transformPoint({ x: g, y: -60, z: 0 }), cx, cy);
+      const p2 = projectCam(transformPoint({ x: g, y: 60, z: 0 }), cx, cy);
+      const p3 = projectCam(transformPoint({ x: -60, y: g, z: 0 }), cx, cy);
+      const p4 = projectCam(transformPoint({ x: 60, y: g, z: 0 }), cx, cy);
       ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
       ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke();
     }
 
-    for (let i = 0; i < data.lines.length; i++) {
-      const seg = data.lines[i];
-      const p1 = project3D(seg.x1, seg.y1, seg.z1, cx, cy);
-      const p2 = project3D(seg.x2, seg.y2, seg.z2, cx, cy);
-      ctx.strokeStyle = seg.color;
-      ctx.lineWidth = seg.w;
+    // Transform, compute lighting, & Painter's-sort all 3D faces back-to-front
+    const renderList = [];
+    for (let i = 0; i < data.faces.length; i++) {
+      const f = data.faces[i];
+      const camPts = f.pts.map(transformPoint);
+
+      // Compute face normal in camera space for directional + specular shading
+      const ux = camPts[1].x - camPts[0].x, uy = camPts[1].y - camPts[0].y, uz = camPts[1].z - camPts[0].z;
+      const vx = camPts[2].x - camPts[0].x, vy = camPts[2].y - camPts[0].y, vz = camPts[2].z - camPts[0].z;
+      let nx = uy * vz - uz * vy;
+      let ny = uz * vx - ux * vz;
+      let nz = ux * vy - uy * vx;
+      const nLen = Math.hypot(nx, ny, nz) || 1;
+      nx /= nLen; ny /= nLen; nz /= nLen;
+
+      // Two-sided normal alignment toward viewer (-Z)
+      if (nz > 0) { nx = -nx; ny = -ny; nz = -nz; }
+
+      const diff = Math.max(0, nx * lightDir.x + ny * lightDir.y + nz * lightDir.z);
+      const spec = Math.pow(diff, 14) * 0.45;
+      const shade = 0.38 + 0.62 * diff;
+
+      const r = Math.min(255, Math.round(f.rgb[0] * shade + 255 * spec));
+      const g = Math.min(255, Math.round(f.rgb[1] * shade + 255 * spec));
+      const b = Math.min(255, Math.round(f.rgb[2] * shade + 255 * spec));
+
+      let avgZ = 0;
+      for (let k = 0; k < camPts.length; k++) avgZ += camPts[k].z;
+      avgZ /= camPts.length;
+
+      renderList.push({
+        proj: camPts.map(function (cp) { return projectCam(cp, cx, cy); }),
+        depth: avgZ,
+        fill: 'rgba(' + r + ',' + g + ',' + b + ',' + f.alpha + ')',
+        stroke: 'rgba(' + Math.min(255, r + 25) + ',' + Math.min(255, g + 25) + ',' + Math.min(255, b + 25) + ',' + (f.alpha * 0.6) + ')'
+      });
+    }
+
+    renderList.sort(function (a, b) { return b.depth - a.depth; });
+
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 0.6;
+    for (let i = 0; i < renderList.length; i++) {
+      const item = renderList[i];
+      ctx.fillStyle = item.fill;
+      ctx.strokeStyle = item.stroke;
       ctx.beginPath();
-      ctx.moveTo(p1.x, p1.y);
-      ctx.lineTo(p2.x, p2.y);
+      ctx.moveTo(item.proj[0].x, item.proj[0].y);
+      for (let k = 1; k < item.proj.length; k++) {
+        ctx.lineTo(item.proj[k].x, item.proj[k].y);
+      }
+      ctx.closePath();
+      ctx.fill();
       ctx.stroke();
     }
 
+    // Glowing 40 kHz Wavefront Rings
     if (document.getElementById('waveToggle').checked) {
+      ctx.save();
       for (let i = 0; i < 6; i++) {
         const phase = (waveTime * 0.5 + i / 6) % 1.0;
         const z = -35 + phase * 115;
         const past = z > data.gateTopZ;
-        const alpha = past ? data.coherence * (1 - (z - data.gateTopZ) / 55) * 0.85 : 0.35;
+        const alpha = past ? data.coherence * (1 - (z - data.gateTopZ) / 55) * 0.9 : 0.35;
         if (alpha <= 0.02) continue;
 
-        ctx.strokeStyle = past ? 'rgba(63, 185, 80, ' + alpha + ')' : 'rgba(88, 166, 255, ' + alpha + ')';
-        ctx.lineWidth = past ? 2.2 : 1.4;
+        const colorStr = past ? 'rgba(63, 185, 80, ' + alpha + ')' : 'rgba(88, 166, 255, ' + alpha + ')';
+        ctx.strokeStyle = colorStr;
+        ctx.shadowColor = past ? '#3fb950' : '#58a6ff';
+        ctx.shadowBlur = past ? 12 : 6;
+        ctx.lineWidth = past ? 2.5 : 1.5;
+
         ctx.beginPath();
         const rWave = past ? 22 + 12 * data.coherence : 34;
-        for (let s = 0; s <= 48; s++) {
-          const a = (2 * Math.PI * s) / 48;
-          const pt = project3D(rWave * Math.cos(a), rWave * Math.sin(a), z, cx, cy);
+        for (let s = 0; s <= 56; s++) {
+          const a = (2 * Math.PI * s) / 56;
+          const pt = projectCam(transformPoint({ x: rWave * Math.cos(a), y: rWave * Math.sin(a), z: z }), cx, cy);
           if (s === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
         }
         ctx.stroke();
       }
+      ctx.restore();
     }
+
+    ctx.restore();
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
