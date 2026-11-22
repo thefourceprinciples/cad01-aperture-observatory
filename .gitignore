@@ -1,0 +1,18 @@
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Local bench telemetry & CAD exports (keep outputs/.gitkeep tracked)
+outputs/*.csv
+outputs/*.png
+outputs/*.svg
+outputs/*.dxf
+outputs/*.stl
+!outputs/.gitkeep
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.vscode/
