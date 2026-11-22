@@ -33,8 +33,8 @@
   <script type="importmap">
     {
       "imports": {
-        "three": "https://unpkg.com",
-        "three/addons/": "https://unpkg.com"
+        "three": "https://esm.sh",
+        "three/addons/": "https://esm.sh/examples/jsm/"
       }
     }
   </script>
@@ -105,11 +105,16 @@
 
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    controls.target.set(0, 0, 28);
 
-    scene.add(new THREE.AmbientLight(0xffffff, 0.55));
-    const dirLight = new THREE.DirectionalLight(0xffffff, 1.1);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.65));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
     dirLight.position.set(60, -80, 120);
     scene.add(dirLight);
+
+    const backLight = new THREE.DirectionalLight(0x58a6ff, 0.5);
+    backLight.position.set(-60, 80, -40);
+    scene.add(backLight);
 
     const grid = new THREE.GridHelper(160, 16, 0x30363d, 0x21262d);
     grid.rotation.x = Math.PI / 2;
@@ -118,7 +123,6 @@
     let activeGroup = new THREE.Group();
     scene.add(activeGroup);
 
-    // Wavefront pulse rings group (excluded from STL export!)
     const waveGroup = new THREE.Group();
     scene.add(waveGroup);
     const waveRings = [];
@@ -136,7 +140,8 @@
     let gateTopZ = 65.0;
 
     function createStrutMesh(x1, y1, x2, y2, width, height, material) {
-      const dx = x2 - x1, dy = y2 - y1;
+      const dx = x2 - x1;
+      const dy = y2 - y1;
       const len = Math.hypot(dx, dy);
       if (len < 0.05) return null;
       const geom = new THREE.BoxGeometry(len, width, height);
@@ -173,19 +178,29 @@
           nodes.push([r * Math.cos(ang), r * Math.sin(ang)]);
         }
       }
+
       const maxEdge = (tubeR / rings) * 1.45;
       for (let i = 0; i < nodes.length; i++) {
+        const x1 = nodes[i][0];
+        const y1 = nodes[i][1];
         for (let j = i + 1; j < nodes.length; j++) {
-          const d = Math.hypot(nodes[i][0] - nodes[j][0], nodes[i][1] - nodes[j][1]);
+          const x2 = nodes[j][0];
+          const y2 = nodes[j][1];
+          const d = Math.hypot(x1 - x2, y1 - y2);
           if (d <= maxEdge) {
-            const strut = createStrutMesh(nodes[i][0], nodes[i][1], nodes[j][0], nodes[j][1], strutWidth, thick, mat);
+            const strut = createStrutMesh(x1, y1, x2, y2, strutWidth, thick, mat);
             if (strut) group.add(strut);
           }
         }
-        const rNode = Math.hypot(nodes[i][0], nodes[i][1]);
+        const rNode = Math.hypot(x1, y1);
         if (rNode > tubeR * 0.72) {
-          const ang = Math.atan2(nodes[i][1], nodes[i][0]);
-          const rimStrut = createStrutMesh(nodes[i][0], nodes[i][1], (tubeR - 1) * Math.cos(ang), (tubeR - 1) * Math.sin(ang), strutWidth, thick, mat);
+          const ang = Math.atan2(y1, x1);
+          const rimStrut = createStrutMesh(
+            x1, y1,
+            (tubeR - 1.0) * Math.cos(ang),
+            (tubeR - 1.0) * Math.sin(ang),
+            strutWidth, thick, mat
+          );
           if (rimStrut) group.add(rimStrut);
         }
       }
@@ -203,17 +218,20 @@
       const segs = 48;
       for (let k = 0; k < lobes; k++) {
         const baseAng = (2 * Math.PI * k) / lobes;
-        let prev = null;
+        let prevX = null;
+        let prevY = null;
         for (let s = 0; s <= segs; s++) {
           const u = s / segs;
           const r = 9.0 + u * (tubeR - 9.5);
           const theta = baseAng + 0.85 * Math.sin(u * Math.PI);
-          const pt = [r * Math.cos(theta), r * Math.sin(theta)];
-          if (prev) {
-            const rib = createStrutMesh(prev[0], prev[1], pt[0], pt[1], strutWidth * 1.2, thick, mat);
+          const curX = r * Math.cos(theta);
+          const curY = r * Math.sin(theta);
+          if (prevX !== null) {
+            const rib = createStrutMesh(prevX, prevY, curX, curY, strutWidth * 1.2, thick, mat);
             if (rib) group.add(rib);
           }
-          prev = pt;
+          prevX = curX;
+          prevY = curY;
         }
       }
       return group;
@@ -222,7 +240,7 @@
     function buildKreslingGroup(compressionFrac) {
       const group = new THREE.Group();
       const mat = new THREE.MeshStandardMaterial({
-        color: 0x3fb950, transparent: true, opacity: 0.82, side: THREE.DoubleSide, roughness: 0.5
+        color: 0x3fb950, transparent: true, opacity: 0.82, side: THREE.DoubleSide, roughness: 0.45
       });
       const N = 6, R = 35.0;
       const hStory = 30.3 * (1 - 0.62 * compressionFrac);
@@ -233,12 +251,11 @@
 
       for (let story = 0; story < 2; story++) {
         const z0 = story * hStory;
-        const z1 = (story + 1) * hStory;
-        const a0 = story === 0 ? 0 : twist;
-        const a1 = story === 0 ? twist : 0;
-
-        for (let i = 0; i < N; i++) {
-          const t0 = (2 * Math.PI * i) / N + a0;
+const z1 = (story + 1) * hStory;
+const a0 = story === 0 ? 0 : twist;
+const a1 = story === 0 ? twist : 0;
+for (let i = 0; i < N; i++) {
+const t0 = (2 * Math.PI * i) / N + a0;
 const t1 = (2 * Math.PI * (i + 1)) / N + a0;
 const u0 = (2 * Math.PI * i) / N + a1;
 const u1 = (2 * Math.PI * (i + 1)) / N + a1;
@@ -280,18 +297,22 @@ Tube ID: 75.0 mm | Halo OD: 88.0 mm<br/>Coupled Twist Δφ: ${twistDeg.toFixed(1
 if (mode === 'kagome') {
 activeGroup.add(buildKagomeGroup(lobes, strut));
 gateTopZ = 3.0;
+controls.target.set(0, 0, 2);
 } else if (mode === 'phase') {
 const pm = buildPhaseMaskGroup(lobes, strut);
 pm.rotation.z = THREE.MathUtils.degToRad(rotDeg);
 activeGroup.add(pm);
 gateTopZ = 2.4;
+controls.target.set(0, 0, 2);
 } else if (mode === 'kresling') {
 activeGroup.add(buildKreslingGroup(compFrac));
 gateTopZ = 2 * 30.3 * (1 - 0.62 * compFrac);
+controls.target.set(0, 0, gateTopZ / 2);
 } else {
 const kres = buildKreslingGroup(compFrac);
 const hTop = 2 * 30.3 * (1 - 0.62 * compFrac);
 gateTopZ = hTop + 8.0;
+controls.target.set(0, 0, gateTopZ / 2);
 const kag = buildKagomeGroup(lobes, strut);
 kag.position.z = hTop + 1.0;
 const pm = buildPhaseMaskGroup(lobes, strut);
@@ -328,13 +349,12 @@ waveGroup.visible = showWaves;
 if (showWaves) {
 waveRings.forEach(w => {
 w.phase = (w.phase + dt * 0.65) % 1.0;
-// Waves travel from z = -45 up toward gateTopZ; only coherent fraction passes above gateTopZ!
 const z = -45 + w.phase * 135;
 const pastGate = z > gateTopZ;
 w.mesh.position.z = z;
 if (pastGate) {
 w.mesh.material.color.setHex(0x3fb950);
-w.mesh.material.opacity = currentCoherence * (1.0 - (z - gateTopZ) / 60.0) * 0.6;
+w.mesh.material.opacity = currentCoherence * (1.0 - (z - gateTopZ) / 60.0) * 0.65;
 const s = 0.6 + 0.4 * currentCoherence;
 w.mesh.scale.set(s, s, 1);
 } else {
