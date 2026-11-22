@@ -1,5 +1,5 @@
 # CAD-01 Aperture-Scaffold Observatory (`C = O × E × H × X`)
-[![CAD-01 Verification Suite](https://github.com<YOUR-USERNAME>/cad01-aperture-observatory/actions/workflows/ci.yml/badge.svg)](https://github.com<YOUR-USERNAME>/cad01-aperture-observatory/actions/workflows/ci.yml)
+[![CAD-01 Verification Suite](https://github.com<thefourceprinciples>/cad01-aperture-observatory/actions/workflows/ci.yml/badge.svg)](https://github.com<YOUR-USERNAME>/cad01-aperture-observatory/actions/workflows/ci.yml)
 
 Benchtop metamaterial & multiplicative wave-gating testbed translating continuous **Spirograph phase dynamics** into a **discrete Kagome aperture scaffold (`O`)**, modulated by a **40 kHz carrier & dynamic phase wheel (`E`)**, a **bistable 2-story Kresling origami hysteresis stage (`H`)**, and a **quadrature-demodulated receiver (`X`)**.
 
