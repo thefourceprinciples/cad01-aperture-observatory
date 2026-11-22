@@ -47,10 +47,12 @@
     view.setUint32(80, stlTris.length, true);
     let offset = 84;
     for (let i = 0; i < stlTris.length; i++) {
+      const tri = stlTris.at(i);
       view.setFloat32(offset + 8, 1.0, true);
       offset += 12;
+      const verts = [tri.a, tri.b, tri.c];
       for (let j = 0; j < 3; j++) {
-        const v = stlTris[i][j];
+        const v = verts.at(j);
         view.setFloat32(offset, v.x, true);
         view.setFloat32(offset + 4, v.y, true);
         view.setFloat32(offset + 8, v.z, true);
@@ -66,7 +68,6 @@
     link.click();
   });
 
-  // Directional key light vector in camera space
   const lightDir = { x: 0.45, y: 0.65, z: -0.61 };
 
   function render(now) {
@@ -83,7 +84,6 @@
     ctx.save();
     ctx.scale(dpr, dpr);
 
-    // Subtle radial studio backdrop gradient
     const bgGrad = ctx.createRadialGradient(rectW * 0.5, rectH * 0.5, 20, rectW * 0.5, rectH * 0.5, rectW * 0.65);
     bgGrad.addColorStop(0, '#161b22');
     bgGrad.addColorStop(1, '#090c10');
@@ -94,7 +94,6 @@
     const cy = rectH * 0.58;
     const data = window.CAD01_Mesh.buildSceneData();
 
-    // Base reference grid
     ctx.strokeStyle = 'rgba(48, 54, 61, 0.55)';
     ctx.lineWidth = 1;
     for (let g = -60; g <= 60; g += 20) {
@@ -106,34 +105,32 @@
       ctx.beginPath(); ctx.moveTo(p3.x, p3.y); ctx.lineTo(p4.x, p4.y); ctx.stroke();
     }
 
-    // Transform, compute lighting, & Painter's-sort all 3D faces back-to-front
     const renderList = [];
     for (let i = 0; i < data.faces.length; i++) {
-      const f = data.faces[i];
+      const f = data.faces.at(i);
       const camPts = f.pts.map(transformPoint);
+      const c0 = camPts.at(0), c1 = camPts.at(1), c2 = camPts.at(2);
 
-      // Compute face normal in camera space for directional + specular shading
-      const ux = camPts[1].x - camPts[0].x, uy = camPts[1].y - camPts[0].y, uz = camPts[1].z - camPts[0].z;
-      const vx = camPts[2].x - camPts[0].x, vy = camPts[2].y - camPts[0].y, vz = camPts[2].z - camPts[0].z;
+      const ux = c1.x - c0.x, uy = c1.y - c0.y, uz = c1.z - c0.z;
+      const vx = c2.x - c0.x, vy = c2.y - c0.y, vz = c2.z - c0.z;
       let nx = uy * vz - uz * vy;
       let ny = uz * vx - ux * vz;
       let nz = ux * vy - uy * vx;
       const nLen = Math.hypot(nx, ny, nz) || 1;
       nx /= nLen; ny /= nLen; nz /= nLen;
 
-      // Two-sided normal alignment toward viewer (-Z)
       if (nz > 0) { nx = -nx; ny = -ny; nz = -nz; }
 
       const diff = Math.max(0, nx * lightDir.x + ny * lightDir.y + nz * lightDir.z);
       const spec = Math.pow(diff, 14) * 0.45;
       const shade = 0.38 + 0.62 * diff;
 
-      const r = Math.min(255, Math.round(f.rgb[0] * shade + 255 * spec));
-      const g = Math.min(255, Math.round(f.rgb[1] * shade + 255 * spec));
-      const b = Math.min(255, Math.round(f.rgb[2] * shade + 255 * spec));
+      const r = Math.min(255, Math.round(f.rgb.r * shade + 255 * spec));
+      const g = Math.min(255, Math.round(f.rgb.g * shade + 255 * spec));
+      const b = Math.min(255, Math.round(f.rgb.b * shade + 255 * spec));
 
       let avgZ = 0;
-      for (let k = 0; k < camPts.length; k++) avgZ += camPts[k].z;
+      for (let k = 0; k < camPts.length; k++) avgZ += camPts.at(k).z;
       avgZ /= camPts.length;
 
       renderList.push({
@@ -149,20 +146,21 @@
     ctx.lineJoin = 'round';
     ctx.lineWidth = 0.6;
     for (let i = 0; i < renderList.length; i++) {
-      const item = renderList[i];
+      const item = renderList.at(i);
+      const firstPt = item.proj.at(0);
       ctx.fillStyle = item.fill;
       ctx.strokeStyle = item.stroke;
       ctx.beginPath();
-      ctx.moveTo(item.proj[0].x, item.proj[0].y);
+      ctx.moveTo(firstPt.x, firstPt.y);
       for (let k = 1; k < item.proj.length; k++) {
-        ctx.lineTo(item.proj[k].x, item.proj[k].y);
+        const pt = item.proj.at(k);
+        ctx.lineTo(pt.x, pt.y);
       }
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
     }
 
-    // Glowing 40 kHz Wavefront Rings
     if (document.getElementById('waveToggle').checked) {
       ctx.save();
       for (let i = 0; i < 6; i++) {
